@@ -1,339 +1,216 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Couples Watch Portal</title>
-<link href="https://vjs.zencdn.net/8.6.1/video-js.css" rel="stylesheet" />
-<style>
-:root{--accent:#7c3aed;--muted:#666}
-*{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:#f7f7fb;color:#111}
-.wrap{max-width:1100px;margin:18px auto;padding:18px}
-.card{background:#fff;border-radius:12px;box-shadow:0 6px 18px rgba(20,20,30,0.06);padding:14px;margin-bottom:12px}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-h1{margin:0;font-size:18px}
-.cols{display:grid;grid-template-columns:1fr 360px;gap:18px}
-button,input{padding:8px;border-radius:8px;border:1px solid #e6e6f0}
-button{background:var(--accent);color:#fff;border:0;cursor:pointer}
-button.ghost{background:#eef2ff;color:#222}
-.video-js{width:100%;max-height:480px;background:#000;border-radius:8px;}
-video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
-.cam-grid{position:relative}
-.cam-overlay{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:8px}
-.chat{height:220px;overflow:auto;padding:8px;border-radius:8px;border:1px solid #eee;background:#fbfbff}
-.msg{margin-bottom:8px}
-@media(max-width:980px){.cols{grid-template-columns:1fr}.cam-overlay{right:4px;top:4px}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Watch Together</title>
+  <style>
+    body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; margin:0; padding:0; }
+    #app { display: flex; flex-direction: row; margin-top: 20px; gap: 20px; }
+    #video-chat, #movie-player, #chat { border: 1px solid #ccc; padding: 10px; border-radius: 8px; }
+    video { width: 300px; height: 200px; background: black; }
+    #messages { height: 200px; width: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; margin-bottom: 5px; }
+    input { width: 200px; }
+  </style>
 </head>
 <body>
-<div class="wrap">
-<header>
-<h1>Couples Watch Portal</h1>
-<div class="small"><span id="userStatus">Please login.</span></div>
-</header>
+  <h2>Watch Together (Long Distance Couples)</h2>
 
-<div class="card" id="authCard">
-    <div style="margin-bottom:8px;">
-        <input id="usernameInp" type="text" placeholder="Username (Email)" style="width:50%; margin-right:4px;">
-        <input id="passwordInp" type="password" placeholder="Password" style="width:calc(50% - 4px);">
+  <div>
+    <input id="username" placeholder="Enter username">
+    <button id="loginBtn">Login / Signup</button>
+  </div>
+
+  <div id="roomSection" style="display:none;">
+    <input id="roomInput" placeholder="Enter room code">
+    <button id="createRoomBtn">Create Room</button>
+    <button id="joinRoomBtn">Join Room</button>
+  </div>
+
+  <div id="app" style="display:none;">
+    <div id="video-chat">
+      <h3>Video Chat</h3>
+      <video id="localVideo" autoplay muted></video>
+      <video id="remoteVideo" autoplay></video>
     </div>
-    <button id="loginBtn">Login</button>
-    <button id="registerBtn" class="ghost">Create Account</button>
-</div>
 
-<div class="card" id="roomCard" style="display:none">
-    <button id="createRoom" class="ghost">Create Room</button>
-    <button id="reEnterRoom" class="ghost" style="display:none">Enter My Room</button>
-    <div style="margin-top:8px">Room Code: <b id="roomCodeLabel">—</b></div>
-</div>
-
-<div class="card" id="joinRoomCard" style="display:none">
-    <input id="joinCodeInp" placeholder="Enter Room Code" style="margin-bottom:8px;">
-    <button id="joinBtn">Join Room</button>
-</div>
-
-<button id="logoutBtn" class="ghost" style="display:none;margin-bottom:12px;">Logout</button>
-
-<div class="cols">
-<section class="card">
-    <label>Select movie/video (Local files only visible to host):</label>
-    <input id="fileInp" type="file" accept="video/*" disabled>
-    <input id="urlInp" type="text" placeholder="or paste public URL (.mp4, YouTube link, etc.)" style="margin-top:8px;width:100%" disabled>
-    <div style="margin-top:8px">
-        <button id="hostLoad" disabled>Load Movie</button>
-        <button id="playBtn" class="ghost" disabled>Play</button>
-        <button id="pauseBtn" class="ghost" disabled>Pause</button>
-        <label><input id="camToggle" type="checkbox" disabled> Show Cameras</label>
+    <div id="movie-player">
+      <h3>Movie</h3>
+      <video id="movie" width="400" controls>
+        <source src="movie.mp4" type="video/mp4">
+        Your browser does not support HTML5 video.
+      </video>
+      <br>
+      <button id="playBtn">Play</button>
+      <button id="pauseBtn">Pause</button>
     </div>
-    <div class="cam-grid" style="min-height:140px;margin-top:8px">
-        <video id="movie" class="video-js vjs-default-skin" playsinline controls preload="auto" data-setup='{}'></video>
-        <div class="cam-overlay" id="camOverlay" style="display:none"></div>
+
+    <div id="chat">
+      <h3>Chat</h3>
+      <div id="messages"></div>
+      <input type="text" id="msgInput" placeholder="Type message">
+      <button id="sendBtn">Send</button>
     </div>
-</section>
+  </div>
 
-<aside class="card">
-    <div><b>Participants & Chat</b></div>
-    <ul id="parts"></ul>
-    <div id="chat" class="chat"></div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-        <input id="chatInp" placeholder="Message or emoji" disabled>
-        <button id="sendChat" disabled>Send</button>
-    </div>
-</aside>
-</div>
-</div>
+  <script src="https://cdn.backendless.com/sdk/js/latest/backendless.min.js"></script>
+  <script>
+    // Initialize Backendless
+    const APP_ID = '175B6549-0AFE-41E3-BBEA-5FDB51825200';
+    const API_KEY = 'D3301207-E860-4214-BEA5-910123DFEAD7';
+    Backendless.initApp(APP_ID, API_KEY);
 
-<script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
-<script src="https://unpkg.com/@videojs/http-streaming/dist/videojs-http-streaming.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/videojs-youtube@3.0.1/dist/Youtube.min.js"></script>
-<script src="https://unpkg.com/backendless/dist/backendless.min.js"></script>
+    let currentUser = null;
+    let currentRoom = null;
 
-<script>
-const APP_ID = '175B6549-0AFE-41E3-BBEA-5FDB51825200';
-const API_KEY = 'D3301207-E860-4214-BEA5-910123DFEAD7';
-Backendless.initApp(APP_ID, API_KEY);
+    const loginBtn = document.getElementById("loginBtn");
+    const usernameInput = document.getElementById("username");
+    const roomSection = document.getElementById("roomSection");
+    const appDiv = document.getElementById("app");
+    const roomInput = document.getElementById("roomInput");
+    const createRoomBtn = document.getElementById("createRoomBtn");
+    const joinRoomBtn = document.getElementById("joinRoomBtn");
 
-let room=null, isHost=false, localId=null, localName=null;
-let subscription=null, moviePlayer=null;
-let participants=[], localStream=null;
+    // Login / Signup
+    loginBtn.onclick = async () => {
+      const username = usernameInput.value.trim();
+      if(!username) return alert("Enter username!");
+      try {
+        let user = await Backendless.UserService.login(username, "1234");
+        currentUser = user;
+      } catch(e) {
+        // If login fails, create user
+        let user = new Backendless.User();
+        user.username = username;
+        user.password = "1234";
+        currentUser = await Backendless.UserService.register(user);
+      }
+      alert("Logged in as " + username);
+      roomSection.style.display = "block";
+    };
 
-const userStatus=document.getElementById('userStatus');
-const authCard=document.getElementById('authCard');
-const roomCard=document.getElementById('roomCard');
-const joinRoomCard=document.getElementById('joinRoomCard');
-const usernameInp=document.getElementById('usernameInp');
-const passwordInp=document.getElementById('passwordInp');
-const loginBtn=document.getElementById('loginBtn');
-const registerBtn=document.getElementById('registerBtn');
-const createBtn=document.getElementById('createRoom');
-const reEnterBtn=document.getElementById('reEnterRoom');
-const joinBtn=document.getElementById('joinBtn');
-const roomCodeLabel=document.getElementById('roomCodeLabel');
-const joinCodeInp=document.getElementById('joinCodeInp');
-const fileInp=document.getElementById('fileInp');
-const urlInp=document.getElementById('urlInp');
-const hostLoad=document.getElementById('hostLoad');
-const playBtn=document.getElementById('playBtn');
-const pauseBtn=document.getElementById('pauseBtn');
-const camToggle=document.getElementById('camToggle');
-const camOverlay=document.getElementById('camOverlay');
-const chatBox=document.getElementById('chat');
-const chatInp=document.getElementById('chatInp');
-const sendChat=document.getElementById('sendChat');
-const logoutBtn=document.getElementById('logoutBtn');
+    // Create / Join Room
+    createRoomBtn.onclick = async () => {
+      const roomCode = roomInput.value.trim();
+      if(!roomCode) return alert("Enter room code!");
+      await Backendless.Data.of("Rooms").save({ roomCode });
+      currentRoom = roomCode;
+      startApp();
+    };
 
-function updateUI(loggedIn){
-    if(loggedIn){
-        userStatus.textContent=`Logged in as: ${localName}`;
-        authCard.style.display='none';
-        roomCard.style.display='block';
-        joinRoomCard.style.display='block';
-        logoutBtn.style.display='inline-block';
-        fileInp.disabled = !isHost;
-        urlInp.disabled = !isHost;
-        hostLoad.disabled = !isHost;
-        playBtn.disabled = !isHost;
-        pauseBtn.disabled = !isHost;
-        chatInp.disabled=false;
-        sendChat.disabled=false;
-        camToggle.disabled=false;
-    }else{
-        userStatus.textContent='Please login.';
-        authCard.style.display='block';
-        roomCard.style.display='none';
-        joinRoomCard.style.display='none';
-        logoutBtn.style.display='none';
-        fileInp.disabled = true;
-        urlInp.disabled = true;
-        hostLoad.disabled = true;
-        playBtn.disabled = true;
-        pauseBtn.disabled = true;
-        chatInp.disabled=true;
-        sendChat.disabled=true;
-        camToggle.disabled=true;
+    joinRoomBtn.onclick = async () => {
+      const roomCode = roomInput.value.trim();
+      if(!roomCode) return alert("Enter room code!");
+      const rooms = await Backendless.Data.of("Rooms").find({ where: `roomCode='${roomCode}'` });
+      if(rooms.length === 0) return alert("Room not found!");
+      currentRoom = roomCode;
+      startApp();
+    };
+
+    function startApp() {
+      roomSection.style.display = "none";
+      appDiv.style.display = "flex";
+      initChat();
+      initMovieSync();
+      initVideoChat();
     }
-}
 
-async function loginUser(){
-    const username=usernameInp.value.trim();
-    const password=passwordInp.value.trim();
-    if(!username||!password) return alert('Enter username and password.');
-    try{
-        const user=await Backendless.UserService.login(username,password,true);
-        localId=user.objectId;
-        localName=user.name||user.email.split('@')[0];
-        localStorage.setItem('cw_user',JSON.stringify(user));
-        updateUI(true);
-        appendChat(`Logged in successfully as ${localName}.`,'system');
-        await checkUserRoom();
-    }catch(e){ alert('Login failed: '+e.message); }
-}
+    // Chat
+    const messagesDiv = document.getElementById("messages");
+    const msgInput = document.getElementById("msgInput");
+    const sendBtn = document.getElementById("sendBtn");
 
-async function registerUser(){
-    const username=usernameInp.value.trim();
-    const password=passwordInp.value.trim();
-    if(!username||!password) return alert('Enter username and password.');
-    try{
-        await Backendless.UserService.register({email:username,password:password,name:username.split('@')[0]});
-        alert(`Account created for ${username}! Please log in.`);
-    }catch(e){ alert('Registration failed: '+e.message); }
-}
+    async function initChat() {
+      const chatRT = Backendless.Data.of("Messages").rt();
+      chatRT.addCreateListener((msg) => {
+        if(msg.room !== currentRoom) return;
+        const div = document.createElement("div");
+        div.textContent = `${msg.user}: ${msg.text}`;
+        messagesDiv.appendChild(div);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      });
 
-logoutBtn.addEventListener('click',async ()=>{
-    await Backendless.UserService.logout();
-    localId=null; localName=null;
-    localStorage.removeItem('cw_user');
-    room=null; isHost=false;
-    updateUI(false);
-});
-
-// Video.js
-function initializeVideoPlayer(){
-    if(!moviePlayer){
-        moviePlayer=videojs('movie');
-        moviePlayer.on('play',()=>{ if(isHost && room) publish(room.code,{type:'movie_play',time:moviePlayer.currentTime()}); });
-        moviePlayer.on('pause',()=>{ if(isHost && room) publish(room.code,{type:'movie_pause',time:moviePlayer.currentTime()}); });
-        moviePlayer.on('seeked',()=>{ if(isHost && room) publish(room.code,{type:'movie_seek',time:moviePlayer.currentTime()}); });
+      sendBtn.onclick = async () => {
+        const text = msgInput.value.trim();
+        if(!text) return;
+        await Backendless.Data.of("Messages").save({ user: currentUser.username, text, room: currentRoom });
+        msgInput.value = "";
+      };
     }
-}
 
-function getSourceType(url,isLocalFile){
-    if(isLocalFile) return {type:'video/x-matroska',typeString:'file'};
-    if(url.includes('youtube.com')||url.includes('youtu.be')) return {type:'video/youtube',typeString:'youtube'};
-    if(url.endsWith('.mp4')) return {type:'video/mp4',typeString:'url'};
-    return {type:'video/mp4',typeString:'url'};
-}
+    // Movie sync
+    const movie = document.getElementById("movie");
+    const playBtn = document.getElementById("playBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
 
-// Chat
-function appendChat(text,from='system'){
-    const div=document.createElement('div');
-    div.className='msg';
-    div.innerHTML=`<b>${from}:</b> ${text}`;
-    chatBox.appendChild(div);
-    chatBox.scrollTop=chatBox.scrollHeight;
-}
+    async function initMovieSync() {
+      const movieRT = Backendless.Data.of("MovieSync").rt();
+      movieRT.addUpdateListener((data) => {
+        if(data.room !== currentRoom) return;
+        if(data.action === "play") movie.play();
+        else if(data.action === "pause") movie.pause();
+      });
 
-function channelName(code){ return 'room_'+code; }
-async function subscribe(code){
-    if(subscription) await Backendless.Messaging.unsubscribe(subscription);
-    subscription=await Backendless.Messaging.subscribe(channelName(code),m=>{
-        const msg=Array.isArray(m)?m[0]:m;
-        if(msg.sender===localId) return;
-        handleMessage(msg);
-    });
-}
+      playBtn.onclick = async () => {
+        movie.play();
+        await Backendless.Data.of("MovieSync").save({ room: currentRoom, action: "play" });
+      };
+      pauseBtn.onclick = async () => {
+        movie.pause();
+        await Backendless.Data.of("MovieSync").save({ room: currentRoom, action: "pause" });
+      };
+    }
 
-async function publish(code,payload){
-    if(!localId) return console.error('Not logged in');
-    payload.sender=localId; payload.time=Date.now();
-    try{ await Backendless.Messaging.publish(channelName(code),payload); }catch(e){ console.error(e); }
-}
+    // WebRTC Video Chat (Simple P2P)
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    let localStream, peerConnection;
 
-async function checkUserRoom(){
-    // If user previously created room, show re-enter button
-    const Rooms=Backendless.Data.of('Rooms');
-    const myRoom=await Rooms.find({where:`hostId='${localId}'`});
-    if(myRoom.length){
-        room=myRoom[0]; isHost=true;
-        roomCodeLabel.textContent=room.code;
-        reEnterBtn.style.display='inline-block';
-        await subscribe(room.code);
-        appendChat(`You can re-enter your room: ${room.roomName}`,'system');
-        updateUI(true);
-    }else{ reEnterBtn.style.display='none'; }
-}
+    async function initVideoChat() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
 
-// Create Room
-createBtn.addEventListener('click',async ()=>{
-    if(!localId) return alert('Login first.');
-    const roomName=prompt('Enter room name')||'Room';
-    const code=Math.random().toString(36).slice(2,7).toUpperCase();
-    const Rooms=Backendless.Data.of('Rooms');
-    const rec={code,roomName,hostId:localId,guestIds:[],createdAt:new Date()};
-    try{
-        room=await Rooms.save(rec);
-        isHost=true; roomCodeLabel.textContent=room.code;
-        await subscribe(room.code);
-        appendChat(`Room created. Share code: ${room.code}`,'system');
-        updateUI(true);
-    }catch(e){ alert('Failed to create room: '+e.message); }
-});
+      const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+      peerConnection = new RTCPeerConnection(servers);
 
-// Re-enter my room
-reEnterBtn.addEventListener('click',async ()=>{
-    if(!room) return;
-    await subscribe(room.code);
-    appendChat(`Re-entered room: ${room.roomName}`,'system');
-    updateUI(true);
-});
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-// Join Room
-joinBtn.addEventListener('click',async ()=>{
-    const code=joinCodeInp.value.trim().toUpperCase();
-    if(!code) return alert('Enter code');
-    const Rooms=Backendless.Data.of('Rooms');
-    try{
-        const found=await Rooms.find({where:`code='${code}'`});
-        if(!found.length) return alert('Room not found');
-        room=found[0]; isHost=false; roomCodeLabel.textContent=room.code;
-        // Add guestId to room
-        room.guestIds=room.guestIds||[];
-        if(!room.guestIds.includes(localId)) room.guestIds.push(localId);
-        await Rooms.save(room);
-        await subscribe(room.code);
-        appendChat(`Joined room: ${room.roomName}`,'system');
-        updateUI(true);
-    }catch(e){ alert(e.message); }
-});
+      peerConnection.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
 
-// Load Movie
-hostLoad.addEventListener('click',async ()=>{
-    if(!room||!isHost) return alert('Host only');
-    if(!moviePlayer) initializeVideoPlayer();
-    const file=fileInp.files[0]; const url=urlInp.value.trim();
-    if(file){
-        const blob=URL.createObjectURL(file);
-        moviePlayer.src({src:blob,type:'video/x-matroska'});
-        publish(room.code,{type:'movie_loaded',kind:'file'});
-    }else if(url){
-        const srcType=getSourceType(url,false);
-        moviePlayer.src({src:url,type:srcType.type});
-        publish(room.code,{type:'movie_loaded',kind:srcType.typeString,url});
-    }else alert('Select file or URL');
-});
-
-// Playback controls
-playBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.play(); });
-pauseBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.pause(); });
-
-// Chat
-sendChat.addEventListener('click',()=>{
-    const t=chatInp.value.trim(); if(!t||!room) return;
-    publish(room.code,{type:'chat',text:t,from:localName});
-    appendChat(t,'you'); chatInp.value='';
-});
-
-// Message handler
-async function handleMessage(msg){
-    if(!moviePlayer) initializeVideoPlayer();
-    if(msg.type==='chat'){ appendChat(msg.text,msg.from); }
-    else if(msg.type==='movie_loaded'){
-        if(!isHost){
-            if(msg.kind==='file'){ appendChat('Host loaded local file','system'); }
-            else{ moviePlayer.src({src:msg.url,type:getSourceType(msg.url,false).type}); }
+      // Use Backendless as signaling
+      const signalTable = Backendless.Data.of("Signals");
+      const signalsRT = signalTable.rt();
+      signalsRT.addCreateListener(async (signal) => {
+        if(signal.room !== currentRoom || signal.user === currentUser.username) return;
+        if(signal.sdp) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          if(signal.sdp.type === "offer") {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            await signalTable.save({ room: currentRoom, user: currentUser.username, sdp: answer });
+          }
+        } else if(signal.ice) {
+          try { await peerConnection.addIceCandidate(signal.ice); } catch(e) {}
         }
-    }else if(msg.type==='movie_play'){ if(!isHost){ moviePlayer.currentTime(msg.time); moviePlayer.play(); } }
-    else if(msg.type==='movie_pause'){ if(!isHost){ moviePlayer.currentTime(msg.time); moviePlayer.pause(); } }
-    else if(msg.type==='movie_seek'){ if(!isHost){ moviePlayer.currentTime(msg.time); } }
-}
+      });
 
-// Initialize
-window.onload=()=>{
-    const saved=localStorage.getItem('cw_user');
-    if(saved){ const u=JSON.parse(saved); localId=u.objectId; localName=u.name||u.email.split('@')[0]; updateUI(true); checkUserRoom(); }
-    initializeVideoPlayer();
-};
-</script>
+      peerConnection.onicecandidate = (event) => {
+        if(event.candidate) {
+          signalTable.save({ room: currentRoom, user: currentUser.username, ice: event.candidate });
+        }
+      };
+
+      // Start connection if first user
+      const existingSignals = await signalTable.find({ where: `room='${currentRoom}'` });
+      if(existingSignals.length === 0) {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        await signalTable.save({ room: currentRoom, user: currentUser.username, sdp: offer });
+      }
+    }
+  </script>
 </body>
 </html>
+
