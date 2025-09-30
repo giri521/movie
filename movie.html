@@ -29,37 +29,48 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 <div class="wrap">
 <header>
 <h1>Couples Watch Portal</h1>
-<div class="small">No login required — create or join rooms</div>
+<div class="small"><span id="userStatus">Please login.</span></div>
 </header>
-<div class="card">
-<button id="createRoom" class="ghost">Create Room</button>
-<button id="joinRoom">Join Room</button>
-<div style="margin-top:8px">Room Code: <b id="roomCodeLabel">—</b></div>
+
+<div class="card" id="authCard">
+    <div style="margin-bottom:8px;">
+        <input id="usernameInp" type="text" placeholder="Username (Email)" style="width:50%; margin-right:4px;">
+        <input id="passwordInp" type="password" placeholder="Password" style="width:calc(50% - 4px);">
+    </div>
+    <button id="loginBtn">Login</button>
+    <button id="registerBtn" class="ghost">Create Account</button>
 </div>
+
+<div class="card" id="roomCard" style="display:none">
+    <button id="createRoom" class="ghost" disabled>Create Room</button>
+    <button id="joinRoom" disabled>Join Room</button>
+    <div style="margin-top:8px">Room Code: <b id="roomCodeLabel">—</b></div>
+</div>
+
 <div class="cols">
 <section class="card">
-<label>Select movie/video:</label>
-<input id="fileInp" type="file" accept="video/*">
-<input id="urlInp" type="text" placeholder="or paste public MP4 URL" style="margin-top:8px;width:100%">
-<div style="margin-top:8px">
-<button id="hostLoad">Load Movie</button>
-<button id="playBtn" class="ghost">Play</button>
-<button id="pauseBtn" class="ghost">Pause</button>
-<label><input id="camToggle" type="checkbox"> Show Cameras</label>
-</div>
-<div class="cam-grid" style="min-height:140px;margin-top:8px">
-<video id="movie" playsinline controls></video>
-<div class="cam-overlay" id="camOverlay" style="display:none"></div>
-</div>
+    <label>Select movie/video:</label>
+    <input id="fileInp" type="file" accept="video/*" disabled>
+    <input id="urlInp" type="text" placeholder="or paste public MP4 URL" style="margin-top:8px;width:100%" disabled>
+    <div style="margin-top:8px">
+        <button id="hostLoad" disabled>Load Movie</button>
+        <button id="playBtn" class="ghost" disabled>Play</button>
+        <button id="pauseBtn" class="ghost" disabled>Pause</button>
+        <label><input id="camToggle" type="checkbox" disabled> Show Cameras</label>
+    </div>
+    <div class="cam-grid" style="min-height:140px;margin-top:8px">
+        <video id="movie" playsinline controls></video>
+        <div class="cam-overlay" id="camOverlay" style="display:none"></div>
+    </div>
 </section>
 <aside class="card">
-<div><b>Participants & Chat</b></div>
-<ul id="parts"></ul>
-<div id="chat" class="chat"></div>
-<div style="display:flex;gap:8px;margin-top:8px">
-<input id="chatInp" placeholder="Message or emoji">
-<button id="sendChat">Send</button>
-</div>
+    <div><b>Participants & Chat</b></div>
+    <ul id="parts"></ul>
+    <div id="chat" class="chat"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="chatInp" placeholder="Message or emoji" disabled>
+        <button id="sendChat" disabled>Send</button>
+    </div>
 </aside>
 </div>
 </div>
@@ -71,15 +82,24 @@ Backendless.initApp(APP_ID, API_KEY);
 
 let room = null,
     isHost = false,
-    localId = 'u_' + Math.random().toString(36).slice(2, 9),
-    localName = '';
+    localId = null, // Will be set to Backendless user objectId
+    localName = null; // Will be set to the username
 let subscription = null,
     pc = null,
     localStream = null,
     movieStream = null,
     remoteStreams = {};
-let participants = []; // Track participants for display and signaling
+let participants = [];
+let peerConnections = {};
 
+// --- DOM Elements ---
+const userStatus = document.getElementById('userStatus');
+const authCard = document.getElementById('authCard');
+const roomCard = document.getElementById('roomCard');
+const usernameInp = document.getElementById('usernameInp');
+const passwordInp = document.getElementById('passwordInp');
+const loginBtn = document.getElementById('loginBtn');
+const registerBtn = document.getElementById('registerBtn');
 const createBtn = document.getElementById('createRoom');
 const joinBtn = document.getElementById('joinRoom');
 const roomCodeLabel = document.getElementById('roomCodeLabel');
@@ -96,7 +116,88 @@ const chatBox = document.getElementById('chat');
 const chatInp = document.getElementById('chatInp');
 const sendChat = document.getElementById('sendChat');
 
-// --- Utility Functions ---
+
+// --- UI Management ---
+
+function updateUI(loggedIn) {
+    if (loggedIn) {
+        userStatus.textContent = `Logged in as: ${localName}`;
+        authCard.style.display = 'none';
+        roomCard.style.display = 'block';
+        
+        // Enable basic room controls and chat
+        createBtn.disabled = false;
+        joinBtn.disabled = false;
+        chatInp.disabled = false;
+        sendChat.disabled = false;
+        camToggle.disabled = false;
+        
+        // Movie controls are enabled based on host status, but inputs are still global
+        fileInp.disabled = !isHost;
+        urlInp.disabled = !isHost;
+        hostLoad.disabled = !isHost;
+        playBtn.disabled = !isHost;
+        pauseBtn.disabled = !isHost;
+        
+    } else {
+        userStatus.textContent = 'Please login.';
+        authCard.style.display = 'block';
+        roomCard.style.display = 'none';
+        
+        // Disable everything
+        createBtn.disabled = true;
+        joinBtn.disabled = true;
+        chatInp.disabled = true;
+        sendChat.disabled = true;
+        camToggle.disabled = true;
+        fileInp.disabled = true;
+        urlInp.disabled = true;
+        hostLoad.disabled = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = true;
+    }
+}
+
+
+// --- Authentication Functions ---
+
+async function loginUser() {
+    const username = usernameInp.value.trim();
+    const password = passwordInp.value.trim();
+    if (!username || !password) return alert('Enter username and password.');
+
+    try {
+        const user = await Backendless.UserService.login(username, password, true);
+        localId = user.objectId;
+        localName = user.name || user.email.split('@')[0] || username; // Use 'name' field if available, otherwise email prefix
+        appendChat(`Logged in successfully as ${localName}.`, 'system');
+        updateUI(true);
+    } catch (e) {
+        alert('Login failed: ' + e.message);
+    }
+}
+
+async function registerUser() {
+    const username = usernameInp.value.trim();
+    const password = passwordInp.value.trim();
+    if (!username || !password) return alert('Enter username and password.');
+
+    try {
+        // Backendless uses the email field for username/login by default
+        const user = await Backendless.UserService.register({
+            email: username,
+            password: password,
+            name: username.split('@')[0] // Store a simple name
+        });
+        alert(`Account created for ${username}! Please log in.`);
+        usernameInp.value = username; // Pre-fill login
+        // Do not auto-login; prompt user to log in after registration
+    } catch (e) {
+        alert('Registration failed: ' + e.message);
+    }
+}
+
+// --- Utility Functions (Same as previous, simplified/renamed) ---
 
 function appendChat(text, from = 'system') {
     const div = document.createElement('div');
@@ -124,13 +225,13 @@ async function subscribe(code) {
     if (subscription) await Backendless.Messaging.unsubscribe(subscription);
     subscription = await Backendless.Messaging.subscribe(channelName(code), m => {
         const msg = Array.isArray(m) ? m[0] : m;
-        // Don't process messages sent by ourselves
         if (msg.sender === localId) return;
         handleMessage(msg);
     });
 }
 
 async function publish(code, payload) {
+    if (!localId) return console.error('Not logged in to publish.');
     payload.sender = localId;
     payload.time = Date.now();
     try {
@@ -142,10 +243,8 @@ async function publish(code, payload) {
 
 async function ensureRoomsTable() {
     try {
-        // Just checking if the table exists
         await Backendless.Data.describe('Rooms');
     } catch (e) {
-        // Create table if it doesn't exist (by saving and removing an dummy record)
         await Backendless.Data.of('Rooms').save({
             code: 'INIT',
             roomName: 'Init',
@@ -157,40 +256,23 @@ async function ensureRoomsTable() {
 }
 ensureRoomsTable();
 
-// --- WebRTC Setup (Simplified for signaling) ---
+// --- WebRTC (Simplified Signaling/Streaming - Same logic as before, using IDs) ---
 
-const ICE_SERVERS = [{
-    urls: 'stun:stun.l.google.com:19302'
-}];
-
-// Simple map to store peer connections (realistically needs one PC per remote peer)
-let peerConnections = {};
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function getPeerConnection(remoteSenderId) {
     if (peerConnections[remoteSenderId]) return peerConnections[remoteSenderId];
-
-    const pc = new RTCPeerConnection({
-        iceServers: ICE_SERVERS
-    });
+    // ... (WebRTC PC setup remains the same)
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peerConnections[remoteSenderId] = pc;
 
-    pc.onicecandidate = ({
-        candidate
-    }) => {
+    pc.onicecandidate = ({ candidate }) => {
         if (candidate) {
-            publish(room.code, {
-                type: 'webrtc_signal',
-                signal: {
-                    type: 'candidate',
-                    candidate
-                },
-                to: remoteSenderId // Signal to the specific peer
-            });
+            publish(room.code, { type: 'webrtc_signal', signal: { type: 'candidate', candidate }, to: remoteSenderId });
         }
     };
 
     pc.ontrack = (event) => {
-        // Handle remote stream
         const stream = event.streams[0];
         if (!remoteStreams[remoteSenderId]) {
             appendChat('New video stream received.', 'system');
@@ -201,23 +283,17 @@ function getPeerConnection(remoteSenderId) {
             video.className = 'smallcam';
             video.srcObject = stream;
             camOverlay.appendChild(video);
-            remoteStreams[remoteSenderId] = {
-                stream,
-                video
-            };
+            remoteStreams[remoteSenderId] = { stream, video };
         }
     };
     return pc;
 }
 
 async function startCameraStream() {
+    if (!localId) return;
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true
-        });
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         appendChat('Camera/mic stream started.', 'system');
-        // Display local cam preview
         const localVideo = document.createElement('video');
         localVideo.autoplay = true;
         localVideo.playsinline = true;
@@ -226,18 +302,10 @@ async function startCameraStream() {
         localVideo.id = 'localCam';
         localVideo.srcObject = localStream;
         camOverlay.prepend(localVideo);
-
-        // Initiate call to all existing participants
-        // (A robust app would track all remote IDs. Here we simplify by signaling to all non-local participants.)
-        participants.forEach(p => {
-             if (p !== localName) {
-                // In a real app, you need the remote peer's localId to signal.
-                // We'll rely on the host being able to figure out who the other person is
-                // using a simplified assumption: there's only one other peer.
-                // We'll send an initial message to request their ID if needed.
-                publish(room.code, {type: 'webrtc_init_request', to: p});
-            }
-        });
+        
+        // Find the partner's ID (simple assumption: one host, one guest)
+        const remoteId = isHost ? room.guestId : room.hostId;
+        if (remoteId) initiateWebRTCCall(remoteId);
 
     } catch (e) {
         appendChat('Failed to start camera/mic: ' + e.message, 'system');
@@ -250,7 +318,6 @@ function stopCameraStream() {
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
-        // Remove videos and clear PC map
         camOverlay.innerHTML = '';
         remoteStreams = {};
         peerConnections = {};
@@ -259,13 +326,10 @@ function stopCameraStream() {
 }
 
 async function initiateWebRTCCall(remoteSenderId) {
-    if (!localStream) {
-        appendChat('Cannot initiate call: Camera is not on.', 'system');
-        return;
-    }
+    if (!localStream || !remoteSenderId) return;
+
     const pc = getPeerConnection(remoteSenderId);
 
-    // Add tracks if not already added
     localStream.getTracks().forEach(track => {
         if (!pc.getSenders().find(sender => sender.track === track)) {
             pc.addTrack(track, localStream);
@@ -274,98 +338,69 @@ async function initiateWebRTCCall(remoteSenderId) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    publish(room.code, {
-        type: 'webrtc_signal',
-        signal: pc.localDescription,
-        to: remoteSenderId
-    });
+    publish(room.code, { type: 'webrtc_signal', signal: pc.localDescription, to: remoteSenderId });
 }
 
-// --- Message Handler (The core fix) ---
+// --- Message Handler ---
 
 async function handleMessage(msg) {
     if (msg.type === 'chat') {
         appendChat(msg.text, msg.from);
+
     } else if (msg.type === 'presence' || msg.type === 'presence_join') {
         if (msg.type === 'presence_join') {
             appendChat(`${msg.name} joined.`, 'system');
-            // If host, send full participant list back to the new guest
+            
             if (isHost) {
-                // Publish the updated list including the new joiner
-                publish(room.code, {
-                    type: 'presence',
-                    participants: [...participants.filter(p => p !== msg.name), msg.name]
-                });
+                // Host updates the room record with the guest ID
+                room.guestId = msg.sender;
+                await Backendless.Data.of('Rooms').save(room);
+                
+                // Host publishes the updated participant list
+                publish(room.code, { type: 'presence', participants: [...participants.filter(p => p !== msg.name), msg.name] });
+                
+                // If camera is on, host initiates call
+                if (camToggle.checked && localStream) initiateWebRTCCall(room.guestId);
             }
         }
-        // Always update the list
-        if (msg.participants) {
-            updateParticipants(msg.participants);
-        }
+        if (msg.participants) updateParticipants(msg.participants);
 
     } else if (msg.type === 'movie_loaded') {
         if (!isHost) {
             if (msg.kind === 'url') {
+                // *** FIX: Guest loads the public URL to make the video visible ***
                 movie.src = msg.url;
                 await movie.load();
-                appendChat('Host loaded URL.', 'system');
+                appendChat('Host loaded URL. Video is now visible.', 'system');
             } else if (msg.kind === 'capture') {
-                // Cannot sync local file content
-                appendChat('Host loaded local file (cannot sync file content).', 'system');
+                appendChat('Host loaded local file (content cannot be synced).', 'system');
             }
         }
 
     } else if (msg.type === 'movie_play') {
-        if (!isHost) {
-            // Synchronize playback time before playing
-            movie.currentTime = msg.time;
-            movie.play();
-        }
+        if (!isHost) { movie.currentTime = msg.time; movie.play(); }
 
     } else if (msg.type === 'movie_pause') {
-        if (!isHost) {
-            // Synchronize playback time before pausing
-            movie.currentTime = msg.time;
-            movie.pause();
-        }
+        if (!isHost) { movie.currentTime = msg.time; movie.pause(); }
 
-    } else if (msg.type === 'webrtc_init_request') {
-        // Someone is requesting to start a call, so we send our ID back and initiate the call
-        if (camToggle.checked && localStream) {
-            // Initiate the call back to the person who requested it
-            initiateWebRTCCall(msg.sender);
-        }
-        
     } else if (msg.type === 'webrtc_signal') {
-        // WebRTC Signaling Logic
-        if (msg.to && msg.to !== localId) return; // Not for us
+        if (msg.to && msg.to !== localId) return;
 
         const signal = msg.signal;
         const remoteSenderId = msg.sender;
         const pc = getPeerConnection(remoteSenderId);
 
         if (signal.type === 'offer') {
-            // If we receive an offer, we must have our camera on to accept
-            if (!localStream) {
-                camToggle.checked = true;
-                await startCameraStream();
-            }
+            if (!localStream) { camToggle.checked = true; await startCameraStream(); }
 
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
-            // Add local stream tracks before creating the answer
             localStream.getTracks().forEach(track => {
-                if (!pc.getSenders().find(sender => sender.track === track)) {
-                    pc.addTrack(track, localStream);
-                }
+                if (!pc.getSenders().find(sender => sender.track === track)) { pc.addTrack(track, localStream); }
             });
 
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            publish(room.code, {
-                type: 'webrtc_signal',
-                signal: pc.localDescription,
-                to: remoteSenderId
-            });
+            publish(room.code, { type: 'webrtc_signal', signal: pc.localDescription, to: remoteSenderId });
 
         } else if (signal.type === 'answer') {
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
@@ -373,64 +408,54 @@ async function handleMessage(msg) {
         } else if (signal.type === 'candidate') {
             try {
                 await pc.addIceCandidate(signal.candidate);
-            } catch (e) {
-                console.error('Error adding ICE candidate:', e);
-            }
+            } catch (e) { console.error('Error adding ICE candidate:', e); }
         }
     }
 }
 
 // --- Event Listeners ---
 
+loginBtn.addEventListener('click', loginUser);
+registerBtn.addEventListener('click', registerUser);
+
 createBtn.addEventListener('click', async () => {
+    if (!localId) return alert('Please log in first.');
+
     const roomName = prompt('Enter room name') || 'Room';
     const code = Math.random().toString(36).slice(2, 7).toUpperCase();
     const Rooms = Backendless.Data.of('Rooms');
     try {
-        const rec = {
-            code,
-            roomName,
-            hostId: localId, // Store host's ID for signaling reference
-            createdAt: new Date()
-        };
-        await Rooms.save(rec);
-        room = rec;
+        const rec = { code, roomName, hostId: localId, guestId: null, createdAt: new Date() };
+        room = await Rooms.save(rec);
         isHost = true;
-        localName = 'Host';
         roomCodeLabel.textContent = room.code;
         await subscribe(room.code);
-        appendChat('Room created. You are the host. Share code: ' + room.code, 'system');
-        publish(room.code, {
-            type: 'presence',
-            participants: [localName]
-        });
+        appendChat(`Room created. You are the host. Share code: ${room.code}`, 'system');
+        publish(room.code, { type: 'presence', participants: [localName] });
         updateParticipants([localName]);
+        updateUI(true); // Update UI to reflect host controls
     } catch (e) {
         alert('Failed to create room: ' + e.message);
     }
 });
 
 joinBtn.addEventListener('click', async () => {
+    if (!localId) return alert('Please log in first.');
+
     const code = prompt('Enter room code').trim().toUpperCase();
     if (!code) return;
     const Rooms = Backendless.Data.of('Rooms');
     try {
-        const found = await Rooms.find({
-            where: `code='${code}'`
-        });
+        const found = await Rooms.find({ where: `code='${code}'` });
         if (!found || !found.length) return alert('Room not found');
         room = found[0];
         isHost = false;
-        localName = 'Guest';
         roomCodeLabel.textContent = room.code;
         await subscribe(room.code);
-        appendChat('Joined room: ' + room.code, 'system');
-        // Notify host of joining
-        publish(room.code, {
-            type: 'presence_join',
-            name: localName
-        });
-        updateParticipants([localName]); // Temporary list until presence message arrives
+        appendChat(`Joined room: ${room.code}`, 'system');
+        publish(room.code, { type: 'presence_join', name: localName });
+        updateParticipants([localName]);
+        updateUI(true); // Update UI to reflect guest controls
     } catch (e) {
         alert('Failed to join room: ' + e.message);
     }
@@ -438,44 +463,20 @@ joinBtn.addEventListener('click', async () => {
 
 sendChat.addEventListener('click', () => {
     const t = chatInp.value.trim();
-    if (!t || !room) return;
-    publish(room.code, {
-        type: 'chat',
-        text: t,
-        from: localName
-    });
+    if (!t || !room || !localId) return;
+
+    // Send and append locally
+    publish(room.code, { type: 'chat', text: t, from: localName });
     appendChat(t, 'you');
     chatInp.value = '';
 });
 
-// Sync the movie state when a client clicks an action (only Host's action matters)
-movie.addEventListener('play', () => {
-    if (room && isHost) {
-        // Prevent sync loop if guest controls UI, but enforce host as master
-        publish(room.code, {
-            type: 'movie_play',
-            time: movie.currentTime
-        });
-    }
-});
-movie.addEventListener('pause', () => {
-    if (room && isHost) {
-        publish(room.code, {
-            type: 'movie_pause',
-            time: movie.currentTime
-        });
-    }
-});
+// Video sync listeners (only host publishing matters)
+movie.addEventListener('play', () => { if (room && isHost) publish(room.code, { type: 'movie_play', time: movie.currentTime }); });
+movie.addEventListener('pause', () => { if (room && isHost) publish(room.code, { type: 'movie_pause', time: movie.currentTime }); });
 
 hostLoad.addEventListener('click', async () => {
-    if (!room) {
-        alert('Create/join room first');
-        return;
-    }
-    if (!isHost) {
-        alert('Only the host can load a movie.');
-        return;
-    }
+    if (!room || !isHost) return alert('You must be the host and in a room to load a movie.');
 
     const file = fileInp.files[0];
     const url = urlInp.value.trim();
@@ -485,53 +486,31 @@ hostLoad.addEventListener('click', async () => {
         movie.src = blob;
         await movie.load();
         appendChat('Loaded local file', 'system');
-        publish(room.code, {
-            type: 'movie_loaded',
-            kind: 'capture'
-        });
+        publish(room.code, { type: 'movie_loaded', kind: 'capture' });
     } else if (url) {
         movie.src = url;
         await movie.load();
         appendChat('Loaded URL: ' + url, 'system');
-        publish(room.code, {
-            type: 'movie_loaded',
-            kind: 'url',
-            url
-        });
+        // Publish URL for the guest to load
+        publish(room.code, { type: 'movie_loaded', kind: 'url', url });
     } else {
-        alert('Select file or URL');
+        alert('Select file or public MP4 URL');
     }
 });
 
-// Allow host to control via buttons; buttons are disabled for guests via logic/UI awareness
-playBtn.addEventListener('click', () => {
-    if (isHost) movie.play();
-    else appendChat('Only the host can control playback.', 'system');
-});
-
-pauseBtn.addEventListener('click', () => {
-    if (isHost) movie.pause();
-    else appendChat('Only the host can control playback.', 'system');
-});
-
+// Enforce host-only control for UI buttons
+playBtn.addEventListener('click', () => { if (isHost) movie.play(); else appendChat('Only the host can control playback.', 'system'); });
+pauseBtn.addEventListener('click', () => { if (isHost) movie.pause(); else appendChat('Only the host can control playback.', 'system'); });
 
 camToggle.addEventListener('change', async () => {
     camOverlay.style.display = camToggle.checked ? 'flex' : 'none';
-    if (camToggle.checked) {
-        await startCameraStream();
-        // The startCameraStream function initiates the WebRTC signaling
-    } else {
-        stopCameraStream();
-    }
+    if (camToggle.checked) { await startCameraStream(); } else { stopCameraStream(); }
 });
 
-// Clean up on page exit
-window.addEventListener('beforeunload', () => {
-    if (room) {
-        // Stop any active streams
-        if (localStream) stopCameraStream();
-    }
-});
+// Initial UI setup on load
+window.onload = () => { updateUI(false); ensureRoomsTable(); };
+
+window.addEventListener('beforeunload', () => { if (localStream) stopCameraStream(); });
 </script>
 </body>
 </html>
