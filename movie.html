@@ -51,9 +51,9 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 
 <div class="cols">
 <section class="card">
-    <label>Select movie/video (MP4, MKV, etc.):</label>
+    <label>Select movie/video (Local files can only be seen by the host):</label>
     <input id="fileInp" type="file" accept="video/*" disabled>
-    <input id="urlInp" type="text" placeholder="or paste public video URL (.mp4, .mkv, etc.)" style="margin-top:8px;width:100%" disabled>
+    <input id="urlInp" type="text" placeholder="or paste public URL (.mp4, .mkv, YouTube link, etc.)" style="margin-top:8px;width:100%" disabled>
     <div style="margin-top:8px">
         <button id="hostLoad" disabled>Load Movie</button>
         <button id="playBtn" class="ghost" disabled>Play</button>
@@ -61,7 +61,7 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
         <label><input id="camToggle" type="checkbox" disabled> Show Cameras</label>
     </div>
     <div class="cam-grid" style="min-height:140px;margin-top:8px">
-        <video id="movie" class="video-js vjs-default-skin" playsinline controls preload="auto"></video>
+        <video id="movie" class="video-js vjs-default-skin" playsinline controls preload="auto" data-setup='{}'></video>
         <div class="cam-overlay" id="camOverlay" style="display:none"></div>
     </div>
 </section>
@@ -78,6 +78,8 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 </div>
 
 <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
+<script src="https://unpkg.com/@videojs/http-streaming/dist/videojs-http-streaming.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/videojs-youtube@3.0.1/dist/Youtube.min.js"></script>
 <script src="https://unpkg.com/backendless/dist/backendless.min.js"></script>
 
 <script>
@@ -200,11 +202,13 @@ async function registerUser() {
 
 function initializeVideoPlayer() {
     if (!moviePlayer) {
+        // Initialize the player
         moviePlayer = videojs('movie');
         
         // Attach sync listeners directly to the Video.js player events
         moviePlayer.on('play', () => {
             if (room && isHost) {
+                // Use currentTime() for Video.js
                 publish(room.code, { type: 'movie_play', time: moviePlayer.currentTime() });
             }
         });
@@ -215,7 +219,7 @@ function initializeVideoPlayer() {
             }
         });
 
-        // Optional: Add event listener for seeking to send sync updates
+        // Handle seeking sync
         moviePlayer.on('seeked', () => {
             if (room && isHost) {
                 publish(room.code, { type: 'movie_seek', time: moviePlayer.currentTime() });
@@ -224,6 +228,20 @@ function initializeVideoPlayer() {
     }
 }
 
+// Helper to determine source type for Video.js
+function getSourceType(url, isLocalFile) {
+    if (isLocalFile || url.endsWith('.mkv')) {
+        return { type: 'video/x-matroska', typeString: 'file' }; // Use a generic/MKV type
+    }
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        return { type: 'video/youtube', typeString: 'youtube' };
+    }
+    if (url.endsWith('.mp4')) {
+        return { type: 'video/mp4', typeString: 'url' };
+    }
+    // Default to generic URL type
+    return { type: 'video/mp4', typeString: 'url' }; 
+}
 
 // --- Utility and Backendless Functions (Minimized for brevity) ---
 
@@ -275,7 +293,7 @@ async function ensureRoomsTable() {
 }
 ensureRoomsTable();
 
-// --- WebRTC (Simplified Signaling/Streaming) ---
+// --- WebRTC (Same logic as before) ---
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -341,10 +359,10 @@ async function initiateWebRTCCall(remoteSenderId) {
 }
 
 
-// --- Message Handler (Updated to use Video.js API) ---
+// --- Message Handler (Updated for YouTube and Seeking) ---
 
 async function handleMessage(msg) {
-    if (!moviePlayer) initializeVideoPlayer(); // Ensure player is initialized
+    if (!moviePlayer) initializeVideoPlayer();
 
     if (msg.type === 'chat') {
         appendChat(msg.text, msg.from);
@@ -363,14 +381,14 @@ async function handleMessage(msg) {
 
     } else if (msg.type === 'movie_loaded') {
         if (!isHost) {
-            if (msg.kind === 'url') {
-                // Use Video.js to set the source. It will attempt to play the URL regardless of extension.
-                // The browser/codec must still support the video stream within the container.
-                const type = msg.url.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4';
-                moviePlayer.src({ src: msg.url, type: type });
-                appendChat('Host loaded URL. Video is now visible.', 'system');
-            } else if (msg.kind === 'capture') {
-                appendChat('Host loaded local file (content cannot be synced).', 'system');
+            const sourceType = getSourceType(msg.url || '', msg.kind === 'file');
+
+            if (msg.kind === 'url' || msg.kind === 'youtube') {
+                // Load URL (either direct file or YouTube)
+                moviePlayer.src({ src: msg.url, type: sourceType.type });
+                appendChat(`Host loaded ${sourceType.typeString.toUpperCase()}. Video is now visible.`, 'system');
+            } else if (msg.kind === 'file') {
+                appendChat('Host loaded local file (content cannot be synced to guests).', 'system');
             }
         }
 
@@ -386,7 +404,7 @@ async function handleMessage(msg) {
             moviePlayer.pause(); 
         }
     
-    } else if (msg.type === 'movie_seek') { // Handle seeking sync
+    } else if (msg.type === 'movie_seek') {
         if (!isHost) {
             moviePlayer.currentTime(msg.time);
             appendChat('Host seeked video position.', 'system');
@@ -473,19 +491,25 @@ hostLoad.addEventListener('click', async () => {
 
     const file = fileInp.files[0];
     const url = urlInp.value.trim();
-
+    
     if (file) {
+        // Local file load (Host only)
         const blob = URL.createObjectURL(file);
-        // Video.js source setting for local file
-        const type = file.name.endsWith('.mkv') ? 'video/x-matroska' : file.type || 'video/mp4';
-        moviePlayer.src({ src: blob, type: type });
-        appendChat('Loaded local file', 'system');
-        publish(room.code, { type: 'movie_loaded', kind: 'capture' });
+        const sourceType = getSourceType(file.name, true);
+
+        moviePlayer.src({ src: blob, type: sourceType.type });
+        appendChat('Loaded local file (Only visible to you).', 'system');
+        publish(room.code, { type: 'movie_loaded', kind: 'file' });
+        
     } else if (url) {
-        const type = url.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4';
-        moviePlayer.src({ src: url, type: type });
-        appendChat('Loaded URL: ' + url, 'system');
-        publish(room.code, { type: 'movie_loaded', kind: 'url', url });
+        const sourceType = getSourceType(url, false);
+        
+        moviePlayer.src({ src: url, type: sourceType.type });
+        appendChat(`Loaded URL (${sourceType.typeString.toUpperCase()}).`, 'system');
+        
+        // Publish URL for the guest to load
+        publish(room.code, { type: 'movie_loaded', kind: sourceType.typeString, url });
+        
     } else {
         alert('Select file or public URL');
     }
