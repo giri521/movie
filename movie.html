@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Couples Watch Portal</title>
+<link href="https://vjs.zencdn.net/8.6.1/video-js.css" rel="stylesheet" />
 <style>
 :root{--accent:#7c3aed;--muted:#666}
 *{box-sizing:border-box}
@@ -16,7 +17,8 @@ h1{margin:0;font-size:18px}
 button,input{padding:8px;border-radius:8px;border:1px solid #e6e6f0}
 button{background:var(--accent);color:#fff;border:0;cursor:pointer}
 button.ghost{background:#eef2ff;color:#222}
-video#movie{width:100%;max-height:480px;background:#000;border-radius:8px}
+/* Adjusted styles for Video.js player */
+.video-js{width:100%;max-height:480px;background:#000;border-radius:8px;}
 video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 .cam-grid{position:relative}
 .cam-overlay{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:8px}
@@ -49,9 +51,9 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 
 <div class="cols">
 <section class="card">
-    <label>Select movie/video:</label>
+    <label>Select movie/video (MP4, MKV, etc.):</label>
     <input id="fileInp" type="file" accept="video/*" disabled>
-    <input id="urlInp" type="text" placeholder="or paste public MP4 URL" style="margin-top:8px;width:100%" disabled>
+    <input id="urlInp" type="text" placeholder="or paste public video URL (.mp4, .mkv, etc.)" style="margin-top:8px;width:100%" disabled>
     <div style="margin-top:8px">
         <button id="hostLoad" disabled>Load Movie</button>
         <button id="playBtn" class="ghost" disabled>Play</button>
@@ -59,7 +61,7 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
         <label><input id="camToggle" type="checkbox" disabled> Show Cameras</label>
     </div>
     <div class="cam-grid" style="min-height:140px;margin-top:8px">
-        <video id="movie" playsinline controls></video>
+        <video id="movie" class="video-js vjs-default-skin" playsinline controls preload="auto"></video>
         <div class="cam-overlay" id="camOverlay" style="display:none"></div>
     </div>
 </section>
@@ -74,7 +76,10 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 </aside>
 </div>
 </div>
+
+<script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
 <script src="https://unpkg.com/backendless/dist/backendless.min.js"></script>
+
 <script>
 const APP_ID = '175B6549-0AFE-41E3-BBEA-5FDB51825200';
 const API_KEY = 'D3301207-E860-4214-BEA5-910123DFEAD7';
@@ -82,12 +87,12 @@ Backendless.initApp(APP_ID, API_KEY);
 
 let room = null,
     isHost = false,
-    localId = null, // Will be set to Backendless user objectId
-    localName = null; // Will be set to the username
+    localId = null,
+    localName = null;
 let subscription = null,
     pc = null,
     localStream = null,
-    movieStream = null,
+    moviePlayer = null, // Reference to the Video.js player object
     remoteStreams = {};
 let participants = [];
 let peerConnections = {};
@@ -107,7 +112,6 @@ const partsList = document.getElementById('parts');
 const fileInp = document.getElementById('fileInp');
 const urlInp = document.getElementById('urlInp');
 const hostLoad = document.getElementById('hostLoad');
-const movie = document.getElementById('movie');
 const playBtn = document.getElementById('playBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const camToggle = document.getElementById('camToggle');
@@ -125,14 +129,13 @@ function updateUI(loggedIn) {
         authCard.style.display = 'none';
         roomCard.style.display = 'block';
         
-        // Enable basic room controls and chat
         createBtn.disabled = false;
         joinBtn.disabled = false;
         chatInp.disabled = false;
         sendChat.disabled = false;
         camToggle.disabled = false;
         
-        // Movie controls are enabled based on host status, but inputs are still global
+        // Movie controls are enabled based on host status
         fileInp.disabled = !isHost;
         urlInp.disabled = !isHost;
         hostLoad.disabled = !isHost;
@@ -144,7 +147,6 @@ function updateUI(loggedIn) {
         authCard.style.display = 'block';
         roomCard.style.display = 'none';
         
-        // Disable everything
         createBtn.disabled = true;
         joinBtn.disabled = true;
         chatInp.disabled = true;
@@ -169,7 +171,7 @@ async function loginUser() {
     try {
         const user = await Backendless.UserService.login(username, password, true);
         localId = user.objectId;
-        localName = user.name || user.email.split('@')[0] || username; // Use 'name' field if available, otherwise email prefix
+        localName = user.name || user.email.split('@')[0] || username;
         appendChat(`Logged in successfully as ${localName}.`, 'system');
         updateUI(true);
     } catch (e) {
@@ -183,21 +185,47 @@ async function registerUser() {
     if (!username || !password) return alert('Enter username and password.');
 
     try {
-        // Backendless uses the email field for username/login by default
-        const user = await Backendless.UserService.register({
+        await Backendless.UserService.register({
             email: username,
             password: password,
-            name: username.split('@')[0] // Store a simple name
+            name: username.split('@')[0]
         });
         alert(`Account created for ${username}! Please log in.`);
-        usernameInp.value = username; // Pre-fill login
-        // Do not auto-login; prompt user to log in after registration
     } catch (e) {
         alert('Registration failed: ' + e.message);
     }
 }
 
-// --- Utility Functions (Same as previous, simplified/renamed) ---
+// --- Video.js Setup ---
+
+function initializeVideoPlayer() {
+    if (!moviePlayer) {
+        moviePlayer = videojs('movie');
+        
+        // Attach sync listeners directly to the Video.js player events
+        moviePlayer.on('play', () => {
+            if (room && isHost) {
+                publish(room.code, { type: 'movie_play', time: moviePlayer.currentTime() });
+            }
+        });
+        
+        moviePlayer.on('pause', () => {
+            if (room && isHost) {
+                publish(room.code, { type: 'movie_pause', time: moviePlayer.currentTime() });
+            }
+        });
+
+        // Optional: Add event listener for seeking to send sync updates
+        moviePlayer.on('seeked', () => {
+            if (room && isHost) {
+                publish(room.code, { type: 'movie_seek', time: moviePlayer.currentTime() });
+            }
+        });
+    }
+}
+
+
+// --- Utility and Backendless Functions (Minimized for brevity) ---
 
 function appendChat(text, from = 'system') {
     const div = document.createElement('div');
@@ -217,9 +245,7 @@ function updateParticipants(list) {
     });
 }
 
-function channelName(code) {
-    return 'room_' + code;
-}
+function channelName(code) { return 'room_' + code; }
 
 async function subscribe(code) {
     if (subscription) await Backendless.Messaging.unsubscribe(subscription);
@@ -242,46 +268,32 @@ async function publish(code, payload) {
 }
 
 async function ensureRoomsTable() {
-    try {
-        await Backendless.Data.describe('Rooms');
-    } catch (e) {
-        await Backendless.Data.of('Rooms').save({
-            code: 'INIT',
-            roomName: 'Init',
-            hostId: 'SYS',
-            createdAt: new Date()
-        });
+    try { await Backendless.Data.describe('Rooms'); } catch (e) {
+        await Backendless.Data.of('Rooms').save({ code: 'INIT', roomName: 'Init', hostId: 'SYS', createdAt: new Date() });
         await Backendless.Data.of('Rooms').remove('INIT');
     }
 }
 ensureRoomsTable();
 
-// --- WebRTC (Simplified Signaling/Streaming - Same logic as before, using IDs) ---
+// --- WebRTC (Simplified Signaling/Streaming) ---
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function getPeerConnection(remoteSenderId) {
     if (peerConnections[remoteSenderId]) return peerConnections[remoteSenderId];
-    // ... (WebRTC PC setup remains the same)
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peerConnections[remoteSenderId] = pc;
-
+    // ... (WebRTC event handlers: onicecandidate, ontrack)
     pc.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-            publish(room.code, { type: 'webrtc_signal', signal: { type: 'candidate', candidate }, to: remoteSenderId });
-        }
+        if (candidate) publish(room.code, { type: 'webrtc_signal', signal: { type: 'candidate', candidate }, to: remoteSenderId });
     };
 
     pc.ontrack = (event) => {
         const stream = event.streams[0];
         if (!remoteStreams[remoteSenderId]) {
-            appendChat('New video stream received.', 'system');
             const video = document.createElement('video');
-            video.autoplay = true;
-            video.playsinline = true;
-            video.muted = false;
-            video.className = 'smallcam';
-            video.srcObject = stream;
+            video.autoplay = true; video.playsinline = true; video.muted = false;
+            video.className = 'smallcam'; video.srcObject = stream;
             camOverlay.appendChild(video);
             remoteStreams[remoteSenderId] = { stream, video };
         }
@@ -295,71 +307,55 @@ async function startCameraStream() {
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         appendChat('Camera/mic stream started.', 'system');
         const localVideo = document.createElement('video');
-        localVideo.autoplay = true;
-        localVideo.playsinline = true;
-        localVideo.muted = true;
-        localVideo.className = 'smallcam';
-        localVideo.id = 'localCam';
-        localVideo.srcObject = localStream;
+        localVideo.autoplay = true; localVideo.playsinline = true; localVideo.muted = true;
+        localVideo.className = 'smallcam'; localVideo.id = 'localCam'; localVideo.srcObject = localStream;
         camOverlay.prepend(localVideo);
         
-        // Find the partner's ID (simple assumption: one host, one guest)
         const remoteId = isHost ? room.guestId : room.hostId;
         if (remoteId) initiateWebRTCCall(remoteId);
 
     } catch (e) {
         appendChat('Failed to start camera/mic: ' + e.message, 'system');
-        localStream = null;
-        camToggle.checked = false;
+        localStream = null; camToggle.checked = false;
     }
 }
 
 function stopCameraStream() {
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-        camOverlay.innerHTML = '';
-        remoteStreams = {};
-        peerConnections = {};
+        localStream = null; camOverlay.innerHTML = '';
+        remoteStreams = {}; peerConnections = {};
         appendChat('Camera/mic stream stopped.', 'system');
     }
 }
 
 async function initiateWebRTCCall(remoteSenderId) {
     if (!localStream || !remoteSenderId) return;
-
     const pc = getPeerConnection(remoteSenderId);
-
     localStream.getTracks().forEach(track => {
-        if (!pc.getSenders().find(sender => sender.track === track)) {
-            pc.addTrack(track, localStream);
-        }
+        if (!pc.getSenders().find(sender => sender.track === track)) { pc.addTrack(track, localStream); }
     });
-
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     publish(room.code, { type: 'webrtc_signal', signal: pc.localDescription, to: remoteSenderId });
 }
 
-// --- Message Handler ---
+
+// --- Message Handler (Updated to use Video.js API) ---
 
 async function handleMessage(msg) {
+    if (!moviePlayer) initializeVideoPlayer(); // Ensure player is initialized
+
     if (msg.type === 'chat') {
         appendChat(msg.text, msg.from);
 
     } else if (msg.type === 'presence' || msg.type === 'presence_join') {
         if (msg.type === 'presence_join') {
             appendChat(`${msg.name} joined.`, 'system');
-            
             if (isHost) {
-                // Host updates the room record with the guest ID
                 room.guestId = msg.sender;
                 await Backendless.Data.of('Rooms').save(room);
-                
-                // Host publishes the updated participant list
                 publish(room.code, { type: 'presence', participants: [...participants.filter(p => p !== msg.name), msg.name] });
-                
-                // If camera is on, host initiates call
                 if (camToggle.checked && localStream) initiateWebRTCCall(room.guestId);
             }
         }
@@ -368,9 +364,10 @@ async function handleMessage(msg) {
     } else if (msg.type === 'movie_loaded') {
         if (!isHost) {
             if (msg.kind === 'url') {
-                // *** FIX: Guest loads the public URL to make the video visible ***
-                movie.src = msg.url;
-                await movie.load();
+                // Use Video.js to set the source. It will attempt to play the URL regardless of extension.
+                // The browser/codec must still support the video stream within the container.
+                const type = msg.url.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4';
+                moviePlayer.src({ src: msg.url, type: type });
                 appendChat('Host loaded URL. Video is now visible.', 'system');
             } else if (msg.kind === 'capture') {
                 appendChat('Host loaded local file (content cannot be synced).', 'system');
@@ -378,26 +375,35 @@ async function handleMessage(msg) {
         }
 
     } else if (msg.type === 'movie_play') {
-        if (!isHost) { movie.currentTime = msg.time; movie.play(); }
+        if (!isHost) { 
+            moviePlayer.currentTime(msg.time); 
+            moviePlayer.play(); 
+        }
 
     } else if (msg.type === 'movie_pause') {
-        if (!isHost) { movie.currentTime = msg.time; movie.pause(); }
+        if (!isHost) { 
+            moviePlayer.currentTime(msg.time); 
+            moviePlayer.pause(); 
+        }
+    
+    } else if (msg.type === 'movie_seek') { // Handle seeking sync
+        if (!isHost) {
+            moviePlayer.currentTime(msg.time);
+            appendChat('Host seeked video position.', 'system');
+        }
 
     } else if (msg.type === 'webrtc_signal') {
         if (msg.to && msg.to !== localId) return;
-
         const signal = msg.signal;
         const remoteSenderId = msg.sender;
         const pc = getPeerConnection(remoteSenderId);
 
         if (signal.type === 'offer') {
             if (!localStream) { camToggle.checked = true; await startCameraStream(); }
-
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
             localStream.getTracks().forEach(track => {
                 if (!pc.getSenders().find(sender => sender.track === track)) { pc.addTrack(track, localStream); }
             });
-
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             publish(room.code, { type: 'webrtc_signal', signal: pc.localDescription, to: remoteSenderId });
@@ -406,9 +412,7 @@ async function handleMessage(msg) {
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
 
         } else if (signal.type === 'candidate') {
-            try {
-                await pc.addIceCandidate(signal.candidate);
-            } catch (e) { console.error('Error adding ICE candidate:', e); }
+            try { await pc.addIceCandidate(signal.candidate); } catch (e) { console.error('Error adding ICE candidate:', e); }
         }
     }
 }
@@ -420,7 +424,6 @@ registerBtn.addEventListener('click', registerUser);
 
 createBtn.addEventListener('click', async () => {
     if (!localId) return alert('Please log in first.');
-
     const roomName = prompt('Enter room name') || 'Room';
     const code = Math.random().toString(36).slice(2, 7).toUpperCase();
     const Rooms = Backendless.Data.of('Rooms');
@@ -433,15 +436,12 @@ createBtn.addEventListener('click', async () => {
         appendChat(`Room created. You are the host. Share code: ${room.code}`, 'system');
         publish(room.code, { type: 'presence', participants: [localName] });
         updateParticipants([localName]);
-        updateUI(true); // Update UI to reflect host controls
-    } catch (e) {
-        alert('Failed to create room: ' + e.message);
-    }
+        updateUI(true);
+    } catch (e) { alert('Failed to create room: ' + e.message); }
 });
 
 joinBtn.addEventListener('click', async () => {
     if (!localId) return alert('Please log in first.');
-
     const code = prompt('Enter room code').trim().toUpperCase();
     if (!code) return;
     const Rooms = Backendless.Data.of('Rooms');
@@ -455,60 +455,53 @@ joinBtn.addEventListener('click', async () => {
         appendChat(`Joined room: ${room.code}`, 'system');
         publish(room.code, { type: 'presence_join', name: localName });
         updateParticipants([localName]);
-        updateUI(true); // Update UI to reflect guest controls
-    } catch (e) {
-        alert('Failed to join room: ' + e.message);
-    }
+        updateUI(true);
+    } catch (e) { alert('Failed to join room: ' + e.message); }
 });
 
 sendChat.addEventListener('click', () => {
     const t = chatInp.value.trim();
     if (!t || !room || !localId) return;
-
-    // Send and append locally
     publish(room.code, { type: 'chat', text: t, from: localName });
     appendChat(t, 'you');
     chatInp.value = '';
 });
 
-// Video sync listeners (only host publishing matters)
-movie.addEventListener('play', () => { if (room && isHost) publish(room.code, { type: 'movie_play', time: movie.currentTime }); });
-movie.addEventListener('pause', () => { if (room && isHost) publish(room.code, { type: 'movie_pause', time: movie.currentTime }); });
-
 hostLoad.addEventListener('click', async () => {
     if (!room || !isHost) return alert('You must be the host and in a room to load a movie.');
+    if (!moviePlayer) initializeVideoPlayer();
 
     const file = fileInp.files[0];
     const url = urlInp.value.trim();
 
     if (file) {
         const blob = URL.createObjectURL(file);
-        movie.src = blob;
-        await movie.load();
+        // Video.js source setting for local file
+        const type = file.name.endsWith('.mkv') ? 'video/x-matroska' : file.type || 'video/mp4';
+        moviePlayer.src({ src: blob, type: type });
         appendChat('Loaded local file', 'system');
         publish(room.code, { type: 'movie_loaded', kind: 'capture' });
     } else if (url) {
-        movie.src = url;
-        await movie.load();
+        const type = url.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4';
+        moviePlayer.src({ src: url, type: type });
         appendChat('Loaded URL: ' + url, 'system');
-        // Publish URL for the guest to load
         publish(room.code, { type: 'movie_loaded', kind: 'url', url });
     } else {
-        alert('Select file or public MP4 URL');
+        alert('Select file or public URL');
     }
 });
 
-// Enforce host-only control for UI buttons
-playBtn.addEventListener('click', () => { if (isHost) movie.play(); else appendChat('Only the host can control playback.', 'system'); });
-pauseBtn.addEventListener('click', () => { if (isHost) movie.pause(); else appendChat('Only the host can control playback.', 'system'); });
+// Enforce host-only control for UI buttons, using Video.js API
+playBtn.addEventListener('click', () => { if (isHost) moviePlayer.play(); else appendChat('Only the host can control playback.', 'system'); });
+pauseBtn.addEventListener('click', () => { if (isHost) moviePlayer.pause(); else appendChat('Only the host can control playback.', 'system'); });
 
 camToggle.addEventListener('change', async () => {
     camOverlay.style.display = camToggle.checked ? 'flex' : 'none';
     if (camToggle.checked) { await startCameraStream(); } else { stopCameraStream(); }
 });
 
-// Initial UI setup on load
-window.onload = () => { updateUI(false); ensureRoomsTable(); };
+// Initial setup
+window.onload = () => { updateUI(false); ensureRoomsTable(); initializeVideoPlayer(); };
 
 window.addEventListener('beforeunload', () => { if (localStream) stopCameraStream(); });
 </script>
