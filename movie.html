@@ -33,7 +33,6 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
 <div class="small"><span id="userStatus">Please login.</span></div>
 </header>
 
-<!-- Auth Card -->
 <div class="card" id="authCard">
     <div style="margin-bottom:8px;">
         <input id="usernameInp" type="text" placeholder="Username (Email)" style="width:50%; margin-right:4px;">
@@ -43,22 +42,19 @@ video.smallcam{width:160px;height:90px;object-fit:cover;border-radius:8px}
     <button id="registerBtn" class="ghost">Create Account</button>
 </div>
 
-<!-- Room Card -->
 <div class="card" id="roomCard" style="display:none">
     <button id="createRoom" class="ghost">Create Room</button>
+    <button id="reEnterRoom" class="ghost" style="display:none">Enter My Room</button>
     <div style="margin-top:8px">Room Code: <b id="roomCodeLabel">—</b></div>
 </div>
 
-<!-- Room List -->
-<div class="card" id="roomListCard" style="display:none">
-    <b>Available Rooms:</b>
-    <ul id="roomList"></ul>
+<div class="card" id="joinRoomCard" style="display:none">
+    <input id="joinCodeInp" placeholder="Enter Room Code" style="margin-bottom:8px;">
+    <button id="joinBtn">Join Room</button>
 </div>
 
-<!-- Logout -->
 <button id="logoutBtn" class="ghost" style="display:none;margin-bottom:12px;">Logout</button>
 
-<!-- Main Content -->
 <div class="cols">
 <section class="card">
     <label>Select movie/video (Local files only visible to host):</label>
@@ -98,42 +94,41 @@ const APP_ID = '175B6549-0AFE-41E3-BBEA-5FDB51825200';
 const API_KEY = 'D3301207-E860-4214-BEA5-910123DFEAD7';
 Backendless.initApp(APP_ID, API_KEY);
 
-// Variables
-let room = null, isHost = false, localId = null, localName = null;
-let subscription = null, moviePlayer = null;
-let participants = [], localStream = null, peerConnections = {}, remoteStreams = {};
+let room=null, isHost=false, localId=null, localName=null;
+let subscription=null, moviePlayer=null;
+let participants=[], localStream=null;
 
-// DOM Elements
-const userStatus = document.getElementById('userStatus');
-const authCard = document.getElementById('authCard');
-const roomCard = document.getElementById('roomCard');
-const usernameInp = document.getElementById('usernameInp');
-const passwordInp = document.getElementById('passwordInp');
-const loginBtn = document.getElementById('loginBtn');
-const registerBtn = document.getElementById('registerBtn');
-const createBtn = document.getElementById('createRoom');
-const roomCodeLabel = document.getElementById('roomCodeLabel');
-const partsList = document.getElementById('parts');
-const fileInp = document.getElementById('fileInp');
-const urlInp = document.getElementById('urlInp');
-const hostLoad = document.getElementById('hostLoad');
-const playBtn = document.getElementById('playBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-const camToggle = document.getElementById('camToggle');
-const camOverlay = document.getElementById('camOverlay');
-const chatBox = document.getElementById('chat');
-const chatInp = document.getElementById('chatInp');
-const sendChat = document.getElementById('sendChat');
-const logoutBtn = document.getElementById('logoutBtn');
-const roomListCard = document.getElementById('roomListCard');
-const roomList = document.getElementById('roomList');
+const userStatus=document.getElementById('userStatus');
+const authCard=document.getElementById('authCard');
+const roomCard=document.getElementById('roomCard');
+const joinRoomCard=document.getElementById('joinRoomCard');
+const usernameInp=document.getElementById('usernameInp');
+const passwordInp=document.getElementById('passwordInp');
+const loginBtn=document.getElementById('loginBtn');
+const registerBtn=document.getElementById('registerBtn');
+const createBtn=document.getElementById('createRoom');
+const reEnterBtn=document.getElementById('reEnterRoom');
+const joinBtn=document.getElementById('joinBtn');
+const roomCodeLabel=document.getElementById('roomCodeLabel');
+const joinCodeInp=document.getElementById('joinCodeInp');
+const fileInp=document.getElementById('fileInp');
+const urlInp=document.getElementById('urlInp');
+const hostLoad=document.getElementById('hostLoad');
+const playBtn=document.getElementById('playBtn');
+const pauseBtn=document.getElementById('pauseBtn');
+const camToggle=document.getElementById('camToggle');
+const camOverlay=document.getElementById('camOverlay');
+const chatBox=document.getElementById('chat');
+const chatInp=document.getElementById('chatInp');
+const sendChat=document.getElementById('sendChat');
+const logoutBtn=document.getElementById('logoutBtn');
 
-// --- UI Update ---
 function updateUI(loggedIn){
     if(loggedIn){
         userStatus.textContent=`Logged in as: ${localName}`;
         authCard.style.display='none';
         roomCard.style.display='block';
+        joinRoomCard.style.display='block';
         logoutBtn.style.display='inline-block';
         fileInp.disabled = !isHost;
         urlInp.disabled = !isHost;
@@ -143,12 +138,12 @@ function updateUI(loggedIn){
         chatInp.disabled=false;
         sendChat.disabled=false;
         camToggle.disabled=false;
-    } else {
+    }else{
         userStatus.textContent='Please login.';
         authCard.style.display='block';
         roomCard.style.display='none';
+        joinRoomCard.style.display='none';
         logoutBtn.style.display='none';
-        roomListCard.style.display='none';
         fileInp.disabled = true;
         urlInp.disabled = true;
         hostLoad.disabled = true;
@@ -160,7 +155,6 @@ function updateUI(loggedIn){
     }
 }
 
-// --- Auth Functions ---
 async function loginUser(){
     const username=usernameInp.value.trim();
     const password=passwordInp.value.trim();
@@ -172,7 +166,7 @@ async function loginUser(){
         localStorage.setItem('cw_user',JSON.stringify(user));
         updateUI(true);
         appendChat(`Logged in successfully as ${localName}.`,'system');
-        await loadAvailableRooms();
+        await checkUserRoom();
     }catch(e){ alert('Login failed: '+e.message); }
 }
 
@@ -190,10 +184,11 @@ logoutBtn.addEventListener('click',async ()=>{
     await Backendless.UserService.logout();
     localId=null; localName=null;
     localStorage.removeItem('cw_user');
+    room=null; isHost=false;
     updateUI(false);
 });
 
-// --- Video.js ---
+// Video.js
 function initializeVideoPlayer(){
     if(!moviePlayer){
         moviePlayer=videojs('movie');
@@ -210,7 +205,7 @@ function getSourceType(url,isLocalFile){
     return {type:'video/mp4',typeString:'url'};
 }
 
-// --- Chat & Participants ---
+// Chat
 function appendChat(text,from='system'){
     const div=document.createElement('div');
     div.className='msg';
@@ -219,17 +214,6 @@ function appendChat(text,from='system'){
     chatBox.scrollTop=chatBox.scrollHeight;
 }
 
-function updateParticipants(list){
-    participants=list||[];
-    partsList.innerHTML='';
-    participants.forEach(p=>{
-        const li=document.createElement('li');
-        li.textContent=p===localName?p+' (You)':p;
-        partsList.appendChild(li);
-    });
-}
-
-// --- Backendless Messaging ---
 function channelName(code){ return 'room_'+code; }
 async function subscribe(code){
     if(subscription) await Backendless.Messaging.unsubscribe(subscription);
@@ -246,130 +230,108 @@ async function publish(code,payload){
     try{ await Backendless.Messaging.publish(channelName(code),payload); }catch(e){ console.error(e); }
 }
 
-// --- Rooms Table ---
-async function ensureRoomsTable(){ try{ await Backendless.Data.describe('Rooms'); }catch(e){ await Backendless.Data.of('Rooms').save({code:'INIT',roomName:'Init',hostId:'SYS',createdAt:new Date()}); await Backendless.Data.of('Rooms').remove('INIT'); } }
-ensureRoomsTable();
-
-// --- Load Rooms ---
-async function loadAvailableRooms(){
-    try{
-        const Rooms=Backendless.Data.of('Rooms');
-        const allRooms=await Rooms.find();
-        roomList.innerHTML='';
-        allRooms.forEach(r=>{
-            const li=document.createElement('li');
-            li.innerHTML=`<b>${r.roomName}</b> — Code: ${r.code} <button class="joinRoomBtn" data-code="${r.code}">Join</button>`;
-            roomList.appendChild(li);
-        });
-        roomListCard.style.display='block';
-        document.querySelectorAll('.joinRoomBtn').forEach(btn=>{
-            btn.addEventListener('click',async e=>{
-                const code=e.target.dataset.code;
-                await joinRoomByCode(code);
-            });
-        });
-    }catch(e){ console.error('Failed to load rooms',e); }
-}
-
-async function joinRoomByCode(code){
-    if(!localId) return alert('Login first.');
+async function checkUserRoom(){
+    // If user previously created room, show re-enter button
     const Rooms=Backendless.Data.of('Rooms');
-    try{
-        const found=await Rooms.find({where:`code='${code}'`});
-        if(!found||!found.length) return alert('Room not found');
-        room=found[0]; isHost=false;
+    const myRoom=await Rooms.find({where:`hostId='${localId}'`});
+    if(myRoom.length){
+        room=myRoom[0]; isHost=true;
         roomCodeLabel.textContent=room.code;
+        reEnterBtn.style.display='inline-block';
         await subscribe(room.code);
-        appendChat(`Joined room: ${room.roomName} (${room.code})`,'system');
-        publish(room.code,{type:'presence_join',name:localName});
-        updateParticipants([localName]);
+        appendChat(`You can re-enter your room: ${room.roomName}`,'system');
         updateUI(true);
-    }catch(e){ alert('Failed to join room: '+e.message); }
+    }else{ reEnterBtn.style.display='none'; }
 }
 
-// --- Event Listeners ---
-loginBtn.addEventListener('click',loginUser);
-registerBtn.addEventListener('click',registerUser);
-
+// Create Room
 createBtn.addEventListener('click',async ()=>{
     if(!localId) return alert('Login first.');
     const roomName=prompt('Enter room name')||'Room';
     const code=Math.random().toString(36).slice(2,7).toUpperCase();
     const Rooms=Backendless.Data.of('Rooms');
+    const rec={code,roomName,hostId:localId,guestIds:[],createdAt:new Date()};
     try{
-        const rec={code,roomName,hostId:localId,guestId:null,createdAt:new Date()};
-        room=await Rooms.save(rec); isHost=true;
-        roomCodeLabel.textContent=room.code;
+        room=await Rooms.save(rec);
+        isHost=true; roomCodeLabel.textContent=room.code;
         await subscribe(room.code);
-        appendChat(`Room created. You are the host. Share code: ${room.code}`,'system');
-        publish(room.code,{type:'presence',participants:[localName]});
-        updateParticipants([localName]);
+        appendChat(`Room created. Share code: ${room.code}`,'system');
         updateUI(true);
-        await loadAvailableRooms();
     }catch(e){ alert('Failed to create room: '+e.message); }
 });
 
-sendChat.addEventListener('click',()=>{ 
-    const t=chatInp.value.trim(); 
-    if(!t||!room||!localId) return; 
-    publish(room.code,{type:'chat',text:t,from:localName}); 
-    appendChat(t,'you'); 
-    chatInp.value='';
+// Re-enter my room
+reEnterBtn.addEventListener('click',async ()=>{
+    if(!room) return;
+    await subscribe(room.code);
+    appendChat(`Re-entered room: ${room.roomName}`,'system');
+    updateUI(true);
 });
 
+// Join Room
+joinBtn.addEventListener('click',async ()=>{
+    const code=joinCodeInp.value.trim().toUpperCase();
+    if(!code) return alert('Enter code');
+    const Rooms=Backendless.Data.of('Rooms');
+    try{
+        const found=await Rooms.find({where:`code='${code}'`});
+        if(!found.length) return alert('Room not found');
+        room=found[0]; isHost=false; roomCodeLabel.textContent=room.code;
+        // Add guestId to room
+        room.guestIds=room.guestIds||[];
+        if(!room.guestIds.includes(localId)) room.guestIds.push(localId);
+        await Rooms.save(room);
+        await subscribe(room.code);
+        appendChat(`Joined room: ${room.roomName}`,'system');
+        updateUI(true);
+    }catch(e){ alert(e.message); }
+});
+
+// Load Movie
 hostLoad.addEventListener('click',async ()=>{
-    if(!room||!isHost) return alert('Host & join a room to load.');
+    if(!room||!isHost) return alert('Host only');
     if(!moviePlayer) initializeVideoPlayer();
     const file=fileInp.files[0]; const url=urlInp.value.trim();
     if(file){
         const blob=URL.createObjectURL(file);
-        const sourceType=getSourceType(file.name,true);
-        moviePlayer.src({src:blob,type:sourceType.type});
-        appendChat('Loaded local file (visible only to host)','system');
-        publish(room.code,{type:'movie_loaded',kind:'file',url:blob});
-    } else if(url){
-        const sourceType=getSourceType(url,false);
-        moviePlayer.src({src:url,type:sourceType.type});
-        appendChat(`Loaded URL (${sourceType.typeString.toUpperCase()})`,'system');
-        publish(room.code,{type:'movie_loaded',kind:sourceType.typeString,url});
-    } else alert('Select file or public URL');
+        moviePlayer.src({src:blob,type:'video/x-matroska'});
+        publish(room.code,{type:'movie_loaded',kind:'file'});
+    }else if(url){
+        const srcType=getSourceType(url,false);
+        moviePlayer.src({src:url,type:srcType.type});
+        publish(room.code,{type:'movie_loaded',kind:srcType.typeString,url});
+    }else alert('Select file or URL');
 });
 
-playBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.play(); else appendChat('Only host can control','system'); });
-pauseBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.pause(); else appendChat('Only host can control','system'); });
+// Playback controls
+playBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.play(); });
+pauseBtn.addEventListener('click',()=>{ if(isHost) moviePlayer.pause(); });
 
-// --- Handle incoming messages ---
+// Chat
+sendChat.addEventListener('click',()=>{
+    const t=chatInp.value.trim(); if(!t||!room) return;
+    publish(room.code,{type:'chat',text:t,from:localName});
+    appendChat(t,'you'); chatInp.value='';
+});
+
+// Message handler
 async function handleMessage(msg){
     if(!moviePlayer) initializeVideoPlayer();
     if(msg.type==='chat'){ appendChat(msg.text,msg.from); }
-    else if(msg.type==='presence'||msg.type==='presence_join'){
-        if(msg.type==='presence_join'){ appendChat(`${msg.name} joined.`,'system'); }
-        if(msg.participants) updateParticipants(msg.participants);
-    }
     else if(msg.type==='movie_loaded'){
-        const url=msg.url;
-        if(url){ 
-            const sourceType=getSourceType(url,msg.kind==='file');
-            moviePlayer.src({src:url,type:sourceType.type});
-            appendChat('Movie loaded by host','system');
+        if(!isHost){
+            if(msg.kind==='file'){ appendChat('Host loaded local file','system'); }
+            else{ moviePlayer.src({src:msg.url,type:getSourceType(msg.url,false).type}); }
         }
-    }
-    else if(msg.type==='movie_play'){ moviePlayer.currentTime(msg.time); moviePlayer.play(); }
-    else if(msg.type==='movie_pause'){ moviePlayer.currentTime(msg.time); moviePlayer.pause(); }
-    else if(msg.type==='movie_seek'){ moviePlayer.currentTime(msg.time); appendChat('Host seeked video','system'); }
+    }else if(msg.type==='movie_play'){ if(!isHost){ moviePlayer.currentTime(msg.time); moviePlayer.play(); } }
+    else if(msg.type==='movie_pause'){ if(!isHost){ moviePlayer.currentTime(msg.time); moviePlayer.pause(); } }
+    else if(msg.type==='movie_seek'){ if(!isHost){ moviePlayer.currentTime(msg.time); } }
 }
 
-// --- Initial Setup ---
-window.onload=async ()=>{
-    const savedUser=localStorage.getItem('cw_user');
-    if(savedUser){
-        const user=JSON.parse(savedUser);
-        localId=user.objectId;
-        localName=user.name||user.email.split('@')[0];
-        updateUI(true);
-        await loadAvailableRooms();
-    }else updateUI(false);
-    ensureRoomsTable();
+// Initialize
+window.onload=()=>{
+    const saved=localStorage.getItem('cw_user');
+    if(saved){ const u=JSON.parse(saved); localId=u.objectId; localName=u.name||u.email.split('@')[0]; updateUI(true); checkUserRoom(); }
     initializeVideoPlayer();
 };
 </script>
