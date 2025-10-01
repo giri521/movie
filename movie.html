@@ -1,258 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Watch Together</title>
-<style>
-body { font-family: Arial, sans-serif; margin:0; padding:0; display:flex; flex-direction:column; align-items:center; }
-h2 { margin-top: 20px; }
-#app { display: flex; flex-direction: row; margin-top: 20px; gap: 20px; width: 100%; max-width: 1200px; }
-#video-chat, #movie-player, #chat { border: 1px solid #ccc; padding: 10px; border-radius: 8px; }
-video { width: 300px; height: 200px; background: black; margin-bottom: 5px; }
-#messages { height: 300px; width: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; margin-bottom: 5px; }
-input { width: 200px; margin-bottom:5px; }
-button { margin:2px; }
-#video-grid { display:flex; flex-wrap:wrap; gap:5px; }
-.small-video { width:100px; height:75px; background:black; }
-.adminControls { margin-top:10px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Currency Detector</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    header {
+      text-align: center;
+      padding: 10px;
+      background-color: #2c3e50;
+      color: white;
+      font-size: 1.5em;
+    }
+  </style>
 </head>
 <body>
-<h2>Watch Together (Long Distance Couples)</h2>
-
-<!-- Login/Signup -->
-<div id="loginDiv">
-  <input id="email" placeholder="Email"><br>
-  <input id="password" type="password" placeholder="Password"><br>
-  <button id="loginBtn">Login / Signup</button>
-</div>
-
-<!-- Room creation/join -->
-<div id="roomSection" style="display:none;">
-  <input id="roomNameInput" placeholder="Room Name"><br>
-  <input id="roomPasswordInput" placeholder="Room Password"><br>
-  <button id="createRoomBtn">Create Room</button><br><br>
-  <input id="joinRoomCode" placeholder="Enter Room Code"><br>
-  <input id="joinRoomPassword" placeholder="Enter Room Password"><br>
-  <button id="joinRoomBtn">Join Room</button>
-</div>
-
-<!-- Main App -->
-<div id="app" style="display:none;">
-  <div id="movie-player">
-    <h3>Movie</h3>
-    <video id="movie" width="400" controls></video><br>
-    <div class="adminControls" id="adminMovieControls" style="display:none;">
-      <input type="file" id="uploadMovie"><br>
-      <input id="movieURL" placeholder="Paste movie URL"><br>
-      <button id="loadURLBtn">Load URL</button><br>
-      <button id="playBtn">Play</button>
-      <button id="pauseBtn">Pause</button>
-    </div>
-  </div>
-
-  <div id="video-chat">
-    <h3>Video Chat</h3>
-    <div id="video-grid">
-      <video id="localVideo" autoplay muted class="small-video"></video>
-      <video id="remoteVideo" autoplay class="small-video"></video>
-    </div>
-    <div class="adminControls" id="adminVideoControls" style="display:none;">
-      <button id="toggleUserCamBtn">Toggle User Cam</button>
-      <button id="toggleAdminCamBtn">Toggle My Cam</button>
-    </div>
-  </div>
-
-  <div id="chat">
-    <h3>Chat</h3>
-    <div id="messages"></div>
-    <input type="text" id="msgInput" placeholder="Type message">
-    <button id="sendBtn">Send</button>
-  </div>
-</div>
-
-<script src="https://cdn.backendless.com/sdk/js/latest/backendless.min.js"></script>
-<script>
-const APP_ID = 'A80DB3CE-1405-4A74-A93B-A6D9132D1ED7';
-const API_KEY = '25D786E1-5679-4C75-B88B-42038452EAAD';
-Backendless.initApp(APP_ID, API_KEY);
-
-let currentUser=null, currentRoom=null, isAdmin=false;
-let localStream=null, peerConnection=null;
-let remoteVideoOn=true;
-
-// --- Login / Signup ---
-document.getElementById("loginBtn").onclick = async ()=>{
-  const email = document.getElementById("email").value.trim();
-  const pass = document.getElementById("password").value;
-  if(!email||!pass){ alert("Enter email/password"); return; }
-  try{
-    currentUser = await Backendless.UserService.login(email, pass, true);
-  }catch(e){
-    let user = new Backendless.User();
-    user.email=email;
-    user.password=pass;
-    user.username=email;
-    currentUser = await Backendless.UserService.register(user);
-  }
-  alert("Logged in as "+currentUser.email);
-  document.getElementById("loginDiv").style.display="none";
-  document.getElementById("roomSection").style.display="block";
-};
-
-// --- Room Creation ---
-function generateRoomCode(){ return Math.random().toString(36).substring(2,8).toUpperCase(); }
-
-document.getElementById("createRoomBtn").onclick=async ()=>{
-  const roomName=document.getElementById("roomNameInput").value.trim();
-  const roomPass=document.getElementById("roomPasswordInput").value.trim();
-  if(!roomName||!roomPass){ alert("Enter room name & password"); return; }
-  const roomCode = generateRoomCode();
-  const roomObj = await Backendless.Data.of("Rooms").save({
-    roomName, roomPassword:roomPass, roomCode, adminId:currentUser.objectId
-  });
-  currentRoom = roomObj;
-  isAdmin=true;
-  startApp();
-  alert("Room Created! Code: "+roomCode);
-};
-
-// --- Join Room ---
-document.getElementById("joinRoomBtn").onclick=async ()=>{
-  const roomCode=document.getElementById("joinRoomCode").value.trim();
-  const roomPass=document.getElementById("joinRoomPassword").value.trim();
-  if(!roomCode||!roomPass){ alert("Enter code & password"); return; }
-  const rooms = await Backendless.Data.of("Rooms").find({where:`roomCode='${roomCode}'`});
-  if(rooms.length===0){ alert("Room not found"); return; }
-  const room = rooms[0];
-  if(room.roomPassword!==roomPass){ alert("Wrong password"); return; }
-  currentRoom=room;
-  isAdmin=(currentUser.objectId===room.adminId);
-  startApp();
-};
-
-// --- Start App ---
-function startApp(){
-  document.getElementById("roomSection").style.display="none";
-  document.getElementById("app").style.display="flex";
-  if(isAdmin){
-    document.getElementById("adminMovieControls").style.display="block";
-    document.getElementById("adminVideoControls").style.display="block";
-  }
-  initChat();
-  initMovieSync();
-  initVideoChat();
-}
-
-// --- Chat ---
-const messagesDiv=document.getElementById("messages");
-const msgInput=document.getElementById("msgInput");
-const sendBtn=document.getElementById("sendBtn");
-
-async function initChat(){
-  const chatRT = Backendless.Data.of("Messages").rt();
-  chatRT.addCreateListener((msg)=>{
-    if(msg.roomCode!==currentRoom.roomCode) return;
-    const div=document.createElement("div");
-    div.textContent=`${msg.userEmail}: ${msg.text}`;
-    messagesDiv.appendChild(div);
-    messagesDiv.scrollTop=messagesDiv.scrollHeight;
-  });
-  sendBtn.onclick=async ()=>{
-    const text=msgInput.value.trim(); if(!text)return;
-    await Backendless.Data.of("Messages").save({userEmail:currentUser.email, text, roomCode:currentRoom.roomCode});
-    msgInput.value="";
-  };
-}
-
-// --- Movie Sync ---
-const movie = document.getElementById("movie");
-document.getElementById("uploadMovie").onchange = function(e){
-  const file = e.target.files[0];
-  if(file){ movie.src = URL.createObjectURL(file); movie.load(); }
-};
-document.getElementById("loadURLBtn").onclick=()=>{
-  const url=document.getElementById("movieURL").value.trim();
-  if(url){ movie.src=url; movie.load(); }
-};
-
-const playBtn=document.getElementById("playBtn");
-const pauseBtn=document.getElementById("pauseBtn");
-
-async function initMovieSync(){
-  const movieRT = Backendless.Data.of("MovieSync").rt();
-  movieRT.addUpdateListener((data)=>{
-    if(data.roomCode!==currentRoom.roomCode) return;
-    if(!isAdmin){
-      if(data.action==="play") movie.play();
-      else if(data.action==="pause") movie.pause();
-    }
-  });
-  playBtn.onclick=async ()=>{
-    movie.play();
-    await Backendless.Data.of("MovieSync").save({roomCode:currentRoom.roomCode, action:"play"});
-  };
-  pauseBtn.onclick=async ()=>{
-    movie.pause();
-    await Backendless.Data.of("MovieSync").save({roomCode:currentRoom.roomCode, action:"pause"});
-  };
-}
-
-// --- Video Chat ---
-const localVideo=document.getElementById("localVideo");
-const remoteVideo=document.getElementById("remoteVideo");
-
-async function initVideoChat(){
-  localStream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
-  localVideo.srcObject = localStream;
-
-  const servers={ iceServers:[{urls:"stun:stun.l.google.com:19302"}] };
-  peerConnection = new RTCPeerConnection(servers);
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-  peerConnection.ontrack = (event)=>{ remoteVideo.srcObject = event.streams[0]; };
-
-  const signalTable = Backendless.Data.of("VideoSignals");
-  const signalsRT = signalTable.rt();
-  signalsRT.addCreateListener(async(signal)=>{
-    if(signal.roomCode!==currentRoom.roomCode||signal.userEmail===currentUser.email) return;
-    if(signal.sdp){
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-      if(signal.sdp.type==="offer"){
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        await signalTable.save({roomCode:currentRoom.roomCode,userEmail:currentUser.email,sdp:answer});
-      }
-    } else if(signal.ice){
-      try{ await peerConnection.addIceCandidate(signal.ice); }catch(e){}
-    }
-  });
-
-  peerConnection.onicecandidate = (event)=>{
-    if(event.candidate){
-      signalTable.save({roomCode:currentRoom.roomCode,userEmail:currentUser.email,ice:event.candidate});
-    }
-  };
-
-  if(isAdmin){
-    const existingSignals = await signalTable.find({where:`roomCode='${currentRoom.roomCode}'`});
-    if(existingSignals.length===0){
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      await signalTable.save({roomCode:currentRoom.roomCode,userEmail:currentUser.email,sdp:offer});
-    }
-  }
-}
-
-// --- Admin Video Toggles ---
-document.getElementById("toggleUserCamBtn").onclick=()=>{
-  remoteVideoOn = !remoteVideoOn;
-  remoteVideo.style.display = remoteVideoOn?"block":"none";
-};
-document.getElementById("toggleAdminCamBtn").onclick=()=>{
-  localVideo.srcObject.getTracks().forEach(track=>track.enabled = !track.enabled);
-};
-</script>
+  <header>Currency Detector</header>
+  <iframe 
+      src="https://currency-2-23fd.onrender.com" 
+      allow="camera; microphone; fullscreen"
+      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals">
+  </iframe>
 </body>
 </html>
-
